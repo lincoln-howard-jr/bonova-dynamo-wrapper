@@ -1,0 +1,19 @@
+{
+  "name": "bonova-dynamo-wrapper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lincoln-howard-jr/bonova-dynamo-wrapper.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lincoln-howard-jr/bonova-dynamo-wrapper/issues"
+  },
+  "homepage": "https://github.com/lincoln-howard-jr/bonova-dynamo-wrapper#readme"
+}
