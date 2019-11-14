@@ -18,7 +18,6 @@ class Model {
     this.created = false;
     this.lock = false;
   }
-  static schm = schm;
   // async write to db
   async save () {
     // if locked, stop execution, else lock
