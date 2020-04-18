@@ -8,15 +8,17 @@ const TableName = process.env.DB;
 class Model {
   // constructor takes a a schema and type name
   // creates methods necessary for all models
-  constructor (schema=schm ({}), type, obj) {
+  constructor (schema=schm ({}), type, obj={}, refs=[], created=false) {
     this.schema = schema;
     this.type = type;
-    this.obj = obj;
-    this.id = _id ();
+    this.obj = schema.parse (obj);
+    this.id = created ? obj.id : _id ();
     this.createdAt = new Date ().toString ();
     this.modifiedAt = new Date ().toString ();
-    this.created = false;
+    this.created = created;
     this.lock = false;
+    this.populated = {};
+    this.refs = refs;
   }
   // async write to db
   async save () {
@@ -25,31 +27,33 @@ class Model {
     this.lock = true;
     // if the record exists in the db, update by id
     if (this.created) {
-      return new Promise (async (resolve) => {
+      return new Promise (async (resolve, reject) => {
         try {
           await this.schema.validate (this.obj);
+          let keys = Object.keys (this.schema.params).filter (k => this.obj [k]);
           // set up params
           let params = {TableName};
           params.Key = {id: this.id};
-          params.UpdateExpression = Object.keys (this.schema.params).map (k => `set #${k} = :${k}`).join (', ');
-          params.UpdateExpression += ', set #modifiedAt = :modifiedAt';
-          params.ExpressionAttributeNames = Object.keys (this.schema.params).reduce ((acc, val) => {
+          params.UpdateExpression = 'set ' + keys.map (k => `#${k} = :${k}`).join (', ');
+          params.UpdateExpression += ', #modifiedAt = :modifiedAt';
+          params.ExpressionAttributeNames = keys.reduce ((acc, val) => {
             return {...acc, [('#' + val)]: val};
           }, {'#modifiedAt': 'modifiedAt'});
-          params.ExpressionAttributeValues = Object.keys (this.schema.params).reduce ((acc, val) => {
+          params.ExpressionAttributeValues = keys.reduce ((acc, val) => {
             return {...acc, [(':' + val)]: this.obj [val]};
-          }, {modifiedAt: new Date ()});
+          }, {':modifiedAt': JSON.stringify (new Date ())});
           docClient.update (params, (err, data) => {
             this.lock = false;
-            resolve ([err, data]);
+            if (err) return reject (err);
+            resolve (data);
           })
         } catch (e) {
-          resolve ([e, null]);
+          reject (e);
         }
       });
     }
     // first save - create the item in the table
-    return new Promise (async (resolve) => {
+    return new Promise (async (resolve, reject) => {
       try {
         // ensure type
         await this.schema.validate (this.obj);
@@ -58,28 +62,48 @@ class Model {
           if (err) resolve ([err, null]);
           this.created = true;
           this.lock = false;
-          resolve ([null, data]);
+          resolve (data);
         })
       } catch (e) {
-        resolve ([e, null]);
+        reject (e);
       }
     });
   }
-  // find (all) method
+  // async delete from db
+  async del () {
+    let params = {
+      TableName,
+      Key: {
+          id: this.id
+      },
+      ConditionExpression: "id = :id",
+      ExpressionAttributeValues: {
+          ':id': this.id
+      }
+    }
+    return docClient.delete (params).promise ();
+  }
+  // find all of this type method
   static find (obj) {
+    const types = require ('./types');
     // if nothing is specified, return every document
     if (!obj) {
-      return new Promise (resolve => {
+      return new Promise (async (resolve, reject) => {
         docClient.scan ({TableName}, (err, data) => {
-          if (err) return resolve ([err, null]);
-          resolve ([null, data.Items]);
+          if (err) return reject (err);
+          let items = data.Items.map (item => {
+            let Struct = types [item.type];
+            return new Struct (item, true)
+          });
+          resolve (items);
         });
       });
     }
     // if object defined, create query
-    return new Promise (resolve => {
+    return new Promise ((resolve, reject) => {
+      if (this.type) obj.type = this.type;
       let params = {TableName};
-      params.FilterExpression = Object.keys (obj).map (k => `#${k} = :${k}`).join (', ');
+      params.FilterExpression = Object.keys (obj).map (k => `#${k} = :${k}`).join (' AND ');
       params.ExpressionAttributeNames = Object.keys (obj).reduce ((acc, val) => {
         return {...acc, [('#' + val)]: val}
       }, {});
@@ -87,13 +111,56 @@ class Model {
         return {...acc, [(':' + val)]: obj [val]}
       }, {});
       docClient.scan (params, (err, data) => {
-        if (err) return resolve ([err, null]);
-        resolve ([null, data.Items]);
+        if (err) return reject (err);
+        let items = data.Items.map (item => {
+          let Struct = types [item.type];
+          return new Struct (item, true)
+        });
+        resolve (items);
       })
     });
   }
+  // populate a list
+  static async populateAll (list) {
+    return new Promise (async (resolve, reject) => {
+      try {
+        let db = await Model.find ();
+          list.forEach (item => {
+            item.refs.forEach (ref => {
+              if (item.obj [ref]) {
+                item.populated [ref] = db.filter (record => item.obj [ref] === record.id) [0];
+              }
+            })
+          });
+        resolve ();
+      } catch (e) {
+        reject (e);
+      }
+    });
+  }
+  // populate based on provided refs
+  async populate () {
+    return new Promise (async (resolve, reject) => {
+      try {
+        await Promise.all (this.refs.map (ref => new Promise (async (resolve, reject) => {
+          try {
+            if (this.obj [ref]) this.populated [ref] = (await Model.find ({id: this.obj [ref]})) [0];
+            resolve ();
+          } catch (e) {
+            reject (e);
+          }
+        })));
+        resolve (this);
+      } catch (e) {
+        reject (e);
+      }
+    });
+  }
   toJSON () {
-    return this.obj;
+    return Object.assign ({...this.obj, id: this.id, type: this.type, modifiedAt: this.modifiedAt, createdAt: this.createdAt}, this.populated);
+  }
+  toString () {
+    return this.id;
   }
 }
 
