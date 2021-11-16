@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/lincoln-howard-jr/bonova-dynamo-wrapper#readme",
   "dependencies": {
-    "aws-sdk": "^2.571.0",
+    "aws-sdk": "^2.814.0",
     "schm": "^0.4.1",
     "uuid": "^3.3.3"
   }
